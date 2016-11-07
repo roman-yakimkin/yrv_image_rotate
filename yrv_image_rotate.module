@@ -1,0 +1,130 @@
+<?php 
+function yrv_image_rotate_menu(){
+  $items = array();
+  $items['imagerotate/ajax'] = array(
+    'page callback' => 'yrv_image_rotate_rotate',
+    'delivery callback' => 'ajax_deliver',
+    'access arguments' => array('access content'),
+    'theme callback' => 'ajax_base_page_theme',
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+function yrv_image_rotate_rotate(){
+  
+  $form_parents = func_get_args();
+  $fid = array_shift($form_parents);
+  $direction = (string)array_shift($form_parents);
+  
+  list($form, $form_state, $form_id, $form_build_id, $commands) = ajax_get_form();
+  
+  $current_element = $form;
+  foreach ($form_parents as $parent) {
+    $current_element = $current_element[$parent];
+  }
+
+// Поворот изображения    
+  $fl=file_load($fid);
+  $img = image_load($fl->uri);
+  $degrees = ($direction == 'left') ? -90 : 90;
+  image_rotate($img, $degrees, '0xffffff');
+  image_path_flush($fl->uri);
+  $result = image_save($img);
+  $field_name = $current_element['#field_name'];
+  if ($result){
+    $nid = db_query("SELECT entity_id FROM {field_data_{$field_name}} WHERE {$field_name}_fid=:fid", array(':fid' => $fid))->fetchField();
+
+    db_query("UPDATE {file_managed} SET filesize=:size WHERE fid=:fid", array(':size' => $img->info['file_size'], ':fid' => $fid));
+    db_query("UPDATE {field_data_{$field_name}} SET {$field_name}_width=:width, {$field_name}_height=:height WHERE {$field_name}_fid=:fid LIMIT 1", 
+       array(':width' => $img->info['width'], ':height' => $img->info['height'], ':fid' => $fid));
+
+    db_query("UPDATE {field_revision_{$field_name}} SET {$field_name}_width=:width, {$field_name}_height=:height WHERE {$field_name}_fid=:fid LIMIT 1", 
+       array(':width' => $img->info['width'], ':height' => $img->info['height'], ':fid' => $fid));
+
+    cache_clear_all("field:node:$nid", 'cache_field');
+  } 
+  
+  drupal_process_form($form['#form_id'], $form, $form_state);
+
+  foreach ($form_parents as $parent) {
+    $form = $form[$parent];
+  }
+  
+  $field_instance = field_info_instance($current_element['#entity_type'], $current_element['#field_name'], $current_element['#bundle']);
+  
+  $preview_image_style = $field_instance['widget']['settings']['preview_image_style'];
+  
+  $output = theme('image_style',
+      array(
+        'path' => $fl->uri,
+        'style_name' => $preview_image_style,
+        'alt' => $current_element['#default_value']['alt'],
+        'title' => $current_element['#default_value']['title'],
+        'nosize' => TRUE,
+      ));  
+  
+  $output = str_replace('?itok=','?t='.time().'&itok=',$output);
+
+  $selector_name = '#'.$current_element['#field_name'].'-'.$fid;
+  $commands[] = ajax_command_html($selector_name, $output);
+  return array('#type' => 'ajax', '#commands' => $commands);
+}
+
+function yrv_image_rotate_buttons_process($element, &$form_state, $form){
+  
+  $ajax_settings['effect'] = 'none';
+
+  $element['rotate_left_button'] = array(
+    '#name' => implode('_', $element['#parents']) . '_rotate_left_button',
+    '#type' => 'submit',
+    '#value' => t('Rotate left'),
+    '#validate' => array(),
+    '#submit' => array('yrv_image_rotate_buttons_submit'),
+    '#limit_validation_errors' => array($element['#parents']),
+    '#weight' => -3,
+  );
+  $element['rotate_left_button']['#ajax']['path'] = 'imagerotate/ajax/'.$element['#file']->fid.'/left/'.implode('/', $element['#array_parents']);
+  
+  $element['rotate_right_button'] = array(
+    '#name' => implode('_', $element['#parents']) . '_rotate_right_button',
+    '#type' => 'submit',
+    '#value' => t('Rotate right'),
+    '#validate' => array(),
+    '#submit' => array('yrv_image_rotate_buttons_submit'),
+    '#limit_validation_errors' => array($element['#parents']),
+    '#weight' => -2,
+  );
+  $element['rotate_right_button']['#ajax']['path'] = 'imagerotate/ajax/'.$element['#file']->fid.'/right/'.implode('/', $element['#array_parents']);
+  
+  object_log('element', $element);
+  
+  $element['preview']['#prefix'] = '<div id="'.$element['#field_name'].'-'.$element['#file']->fid.'">';
+  $element['preview']['#suffix'] = '</div>';
+  
+  return $element;
+}
+
+function yrv_image_rotate_buttons_submit($form, &$form_state){
+  $parents = $form_state['triggering_element']['#array_parents'];
+  $button_key = array_pop($parents);
+  $element = drupal_array_get_nested_value($form, $parents);
+  if ($button_key == 'rotate_left_button'){
+  }; 
+  if ($button_key == 'rotate_right_button'){
+  };
+  $form_state['rebuild'] = TRUE;
+}
+
+function yrv_image_rotate_field_widget_form_alter(&$element, &$form_state, $context){
+  if ($context['field']['type'] == 'image') {
+    foreach ($element as $key => &$value){
+      if (is_numeric($key)){
+        if ($value['#default_value']['fid']!=0 ) {
+          $value['#process'][] = 'yrv_image_rotate_buttons_process'; 
+        }
+      }
+    }
+  }
+}

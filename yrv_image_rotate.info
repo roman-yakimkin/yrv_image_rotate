@@ -1,0 +1,8 @@
+name = YRV Image Rotate
+description = Buttons for rotate image field.
+package = YRV
+core = 7.x
+dependencies[] = image
+
+files[] = yrv_image_rotate.module
+files[] = yrv_image_rotate.js
